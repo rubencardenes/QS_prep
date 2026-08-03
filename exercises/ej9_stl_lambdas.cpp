@@ -34,10 +34,8 @@ vector<Detection> topKByScore(vector<Detection> dets, int k) {
     sort(dets.begin(), dets.end(), [&](Detection a, Detection b){
         return a.score > b.score; });
     vector<Detection> dets_out(k);
-    for (int i = 0; i<k; ++i) {
-        dets_out[i] = dets[i];
-    }
-    return dets_out;
+    dets.resize(k);
+    return dets;
 }
 
 // ===========================================================================
