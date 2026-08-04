@@ -1,3 +1,7 @@
 build/
 sol
 ej
+
+.venv/
+__pycache__/
+*.pyc
