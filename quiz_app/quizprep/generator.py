@@ -8,7 +8,7 @@ import random
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .llm import ClaudeCLI, CancelledError, LLMError
+from .llm import LLMClient, CancelledError, LLMError
 from .models import Option, Question, Quiz
 from .topics import DIFFICULTIES, TOPICS_BY_KEY, Topic
 
@@ -93,7 +93,7 @@ def build_plan_prompt(
 
 
 def plan_subtopics(
-    client: ClaudeCLI,
+    client: LLMClient,
     topic: Topic,
     difficulty: str,
     count: int,
@@ -309,7 +309,7 @@ def _stem(text: str) -> str:
 
 
 def generate_quiz(
-    client: ClaudeCLI,
+    client: LLMClient,
     topic_key: str,
     difficulty: str,
     count: int,
@@ -318,6 +318,7 @@ def generate_quiz(
     avoid: list[str] | None = None,
     cancel=None,
     report=None,
+    planning_client: LLMClient | None = None,
 ) -> Quiz:
     """Genera un test. Con muchas preguntas lanza varios bloques en paralelo."""
     topic = TOPICS_BY_KEY[topic_key]
@@ -333,7 +334,7 @@ def generate_quiz(
             report("Planificando subtemas…")
         try:
             plan = plan_subtopics(
-                ClaudeCLI(model="haiku", timeout=client.timeout),
+                planning_client or client,
                 topic,
                 difficulty,
                 count,

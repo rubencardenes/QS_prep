@@ -1,8 +1,4 @@
-"""Backend LLM: invoca el CLI `claude` en modo no interactivo.
-
-Usa la suscripción de Claude Code ya autenticada, así que no hace falta
-ANTHROPIC_API_KEY. Cada llamada es un proceso independiente y cancelable.
-"""
+"""Proveedores CLI autenticados con suscripción; peticiones cancelables."""
 
 from __future__ import annotations
 
@@ -12,16 +8,71 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
-
-MODELS: tuple[tuple[str, str], ...] = (
-    ("sonnet", "Sonnet — rápido (recomendado)"),
-    ("opus", "Opus — más preciso, más lento"),
-    ("haiku", "Haiku — el más rápido"),
-)
+from pathlib import Path
+from typing import Protocol
 
 
 class LLMError(RuntimeError):
     pass
+
+
+class LLMClient(Protocol):
+    def complete(self, system: str, prompt: str, cancel=None) -> str: ...
+
+
+@dataclass
+class CodexCLI:
+    model: str = "gpt-5.6-sol"
+    binary: str = "codex"
+    timeout: int = 420
+
+    def __post_init__(self) -> None:
+        resolved = shutil.which(self.binary)
+        if resolved is None:
+            raise LLMError(f"No se encuentra «{self.binary}». Instala Codex CLI y ejecuta codex login con tu cuenta de ChatGPT.")
+        self.binary = resolved
+
+    def complete(self, system: str, prompt: str, cancel=None) -> str:
+        env = os.environ.copy()
+        env["NO_COLOR"] = "1"
+        for key in ("OPENAI_API_KEY", "CODEX_API_KEY"):
+            env.pop(key, None)
+        with tempfile.TemporaryDirectory(prefix="quizprep-codex-") as workdir:
+            output = Path(workdir) / "response.txt"
+            command = [
+                self.binary, "exec", "--ignore-user-config", "--ephemeral",
+                "--skip-git-repo-check", "--sandbox", "read-only",
+                "--color", "never", "--model", self.model,
+                "-c", 'forced_login_method="chatgpt"',
+                "-c", 'model_provider="openai"',
+                "-c", "model_reasoning_effort=\"low\"",
+                "--output-last-message", str(output), "-",
+            ]
+            request = system + "\n\nResponde directamente sin usar herramientas.\n\n" + prompt
+            try:
+                proc = subprocess.Popen(command, stdin=subprocess.PIPE,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        text=True, cwd=workdir, env=env)
+            except OSError as exc:
+                raise LLMError(f"No se pudo lanzar Codex: {exc}") from exc
+            try:
+                stdout, stderr = _communicate(proc, self.timeout, cancel, request)
+            except (TimeoutError, _Cancelled) as exc:
+                proc.kill()
+                proc.communicate()
+                if isinstance(exc, _Cancelled):
+                    raise
+                raise LLMError(f"La generación superó el tiempo límite ({self.timeout}s).") from None
+            if proc.returncode != 0:
+                detail = (stderr or stdout or "").strip()[:1500]
+                raise LLMError(f"Codex terminó con código {proc.returncode}. Comprueba codex login y el acceso a {self.model}.\n{detail}")
+            try:
+                result = output.read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                raise LLMError("Codex no escribió la respuesta final.") from exc
+            if not result:
+                raise LLMError("Codex devolvió una respuesta vacía.")
+            return result
 
 
 @dataclass
@@ -110,14 +161,17 @@ class _Cancelled(Exception):
 CancelledError = _Cancelled
 
 
-def _communicate(proc: subprocess.Popen, timeout: int, cancel) -> tuple[str, str]:
+def _communicate(proc: subprocess.Popen, timeout: int, cancel, input_text=None) -> tuple[str, str]:
     """Espera al proceso comprobando periódicamente la cancelación."""
     waited = 0.0
     step = 0.25
     while True:
         try:
-            return proc.communicate(timeout=step)
+            if cancel is not None and cancel():
+                raise _Cancelled
+            return proc.communicate(input=input_text, timeout=step)
         except subprocess.TimeoutExpired:
+            input_text = None
             waited += step
             if cancel is not None and cancel():
                 raise _Cancelled from None

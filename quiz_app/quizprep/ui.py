@@ -33,7 +33,8 @@ from .generator import (
     build_analysis_prompt,
     generate_quiz,
 )
-from .llm import MODELS, ClaudeCLI, CancelledError, LLMError
+from .llm import CancelledError, LLMError
+from .settings import Settings, load_settings
 from .models import Quiz
 from .theme import DARK, LIGHT, Palette, document_css, stylesheet
 from .topics import DIFFICULTIES, TOPICS, TOPICS_BY_KEY
@@ -88,7 +89,7 @@ class SetupPage(QWidget):
     start_requested = Signal(dict)
     cancel_requested = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, settings: Settings, parent=None):
         super().__init__(parent)
         root = QVBoxLayout(self)
         root.setContentsMargins(40, 32, 40, 32)
@@ -97,7 +98,7 @@ class SetupPage(QWidget):
         title = QLabel("Preparación de entrevista técnica")
         title.setObjectName("Title")
         subtitle = QLabel(
-            "Tests de opción múltiple generados con Claude. "
+            f"Tests de opción múltiple generados con {settings.label}. "
             "Ojo: una pregunta puede tener varias respuestas correctas."
         )
         subtitle.setObjectName("Subtitle")
@@ -130,8 +131,9 @@ class SetupPage(QWidget):
         self.language.addItem("Inglés", "en")
 
         self.model = QComboBox()
-        for key, label in MODELS:
+        for key, label in settings.models():
             self.model.addItem(label, key)
+        self.model.setCurrentIndex(self.model.findData(settings.model))
 
         form.addRow("Tema", self.topic)
         form.addRow("Nivel", self.difficulty)
@@ -591,12 +593,13 @@ class ResultsPage(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, palette: Palette):
+    def __init__(self, palette: Palette, settings: Settings):
         super().__init__()
         self.setWindowTitle("Quantum Prep — Test de entrevista")
         self.resize(1040, 800)
         self.setMinimumSize(880, 640)
 
+        self.settings = settings
         self._palette = palette
         self._css = document_css(palette)
         self._worker: Worker | None = None
@@ -605,7 +608,7 @@ class MainWindow(QMainWindow):
         self._elapsed = 0
 
         self.stack = QStackedWidget()
-        self.setup_page = SetupPage()
+        self.setup_page = SetupPage(settings)
         self.quiz_page = QuizPage(self._css)
         self.results_page = ResultsPage(self._css, palette)
         for page in (self.setup_page, self.quiz_page, self.results_page):
@@ -623,9 +626,9 @@ class MainWindow(QMainWindow):
     # -- generación --------------------------------------------------------
     def start_generation(self, config: dict) -> None:
         try:
-            client = ClaudeCLI(model=config["model"])
+            client = self.settings.client(model=config["model"])
         except LLMError as exc:
-            QMessageBox.critical(self, "Falta el CLI de Claude", str(exc))
+            QMessageBox.critical(self, "Error del proveedor", str(exc))
             return
 
         self._config = config
@@ -644,7 +647,7 @@ class MainWindow(QMainWindow):
         def tick() -> None:
             seconds = int(time.monotonic() - started)
             self.setup_page.status.setText(
-                f"Generando {config['count']} preguntas con Claude · "
+                f"Generando {config['count']} preguntas con {self.settings.label} · "
                 f"{state['detail']} · {seconds // 60:02d}:{seconds % 60:02d}"
             )
 
@@ -664,6 +667,7 @@ class MainWindow(QMainWindow):
                 avoid=avoid,
                 cancel=cancel,
                 report=report,
+                planning_client=self.settings.client(self.settings.planning_model),
             )
 
         worker = Worker(job, self)
@@ -753,13 +757,13 @@ class MainWindow(QMainWindow):
         if quiz is None or self._worker is not None:
             return
         try:
-            client = ClaudeCLI(model=self._config.get("model", "sonnet"))
+            client = self.settings.client(model=self._config.get("model"))
         except LLMError as exc:
-            QMessageBox.critical(self, "Falta el CLI de Claude", str(exc))
+            QMessageBox.critical(self, "Error del proveedor", str(exc))
             return
 
         prompt = build_analysis_prompt(quiz, self._config.get("language", "es"))
-        self.results_page.set_analysis_busy(True, "Pidiendo el diagnóstico a Claude…")
+        self.results_page.set_analysis_busy(True, f"Pidiendo el diagnóstico a {self.settings.label}…")
 
         def job(cancel, _report):
             return client.complete(ANALYSIS_SYSTEM, prompt, cancel=cancel)
@@ -816,6 +820,11 @@ def run() -> int:
     palette = DARK if dark else LIGHT
     app.setStyleSheet(stylesheet(palette))
     configure_widgets(palette)
-    window = MainWindow(palette)
+    try:
+        settings = load_settings()
+    except LLMError as exc:
+        QMessageBox.critical(None, "Configuración inválida", str(exc))
+        return 1
+    window = MainWindow(palette, settings)
     window.show()
     return app.exec()
