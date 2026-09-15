@@ -156,6 +156,22 @@ def stylesheet(p: Palette) -> str:
         outline: none;
     }}
 
+    QTableWidget {{
+        background-color: {p.surface};
+        alternate-background-color: {p.surface_alt};
+        border: 1px solid {p.border};
+        border-radius: 8px;
+        gridline-color: {p.border};
+        selection-background-color: {p.accent};
+        selection-color: {p.accent_text};
+    }}
+    QHeaderView::section {{
+        background-color: {p.surface_alt}; color: {p.text};
+        border: none; border-right: 1px solid {p.border};
+        border-bottom: 1px solid {p.border}; padding: 7px;
+        font-weight: 600;
+    }}
+
     QCheckBox::indicator {{
         width: 18px; height: 18px;
         border: 1px solid {p.border}; border-radius: 5px;

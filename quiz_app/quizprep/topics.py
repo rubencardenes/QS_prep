@@ -94,11 +94,22 @@ TOPICS: tuple[Topic, ...] = (
         notes=("jetson_ros2_QA.md",),
     ),
     Topic(
+        key="ml",
+        label="Machine Learning (conceptos y algoritmos)",
+        brief=(
+            "Conceptos y algoritmos de machine learning: aprendizaje supervisado y "
+            "no supervisado, regresión y clasificación, árboles y ensembles, SVM, "
+            "k-NN, clustering, reducción de dimensionalidad, sesgo-varianza, "
+            "regularización, selección de características, métricas, validación "
+            "cruzada, data leakage, optimización y fundamentos de redes neuronales."
+        ),
+    ),
+    Topic(
         key="mixed",
         label="Mixto (entrevista completa)",
         brief=(
-            "Mezcla equilibrada de C++ moderno, Python, computer vision, OpenCV, "
-            "Jetson/TensorRT y ROS 2, como en una entrevista técnica real."
+            "Mezcla equilibrada de C++ moderno, Python, machine learning, computer "
+            "vision, OpenCV, Jetson/TensorRT y ROS 2, como en una entrevista técnica real."
         ),
         notes=("cpp_moderno.md", "openCV C++.md", "jetson_ros2_QA.md"),
     ),

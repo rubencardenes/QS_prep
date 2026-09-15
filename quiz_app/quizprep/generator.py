@@ -188,6 +188,34 @@ ANALYSIS_SYSTEM = (
     "Eres directo, concreto y accionable. Escribes en Markdown."
 )
 
+QUESTION_REVIEW_SYSTEM = (
+    "Eres un mentor técnico paciente y riguroso que prepara a un ingeniero para "
+    "entrevistas. Explicas desde los fundamentos, conectas teoría y práctica y "
+    "escribes en Markdown claro. No inventes información que no aparezca en la "
+    "pregunta y señala cualquier ambigüedad real."
+)
+
+
+def build_question_review_prompt(question_review: str, topic: str,
+                                 difficulty: str, language: str = "es") -> str:
+    """Prompt para profundizar en una pregunta ya corregida del histórico."""
+    lang_name = {"es": "español", "en": "inglés"}.get(language, "español")
+    return (
+        f"Analiza en {lang_name} esta pregunta de un test sobre «{topic}» "
+        f"(nivel {difficulty}). El bloque incluye las opciones, cuáles marcó el "
+        "candidato, cuáles son correctas y la explicación original.\n\n"
+        "Estructura la respuesta, con un máximo de 700 palabras, así:\n"
+        "1. **Idea fundamental**: explica desde cero los conceptos que hay que dominar.\n"
+        "2. **Razonamiento paso a paso**: cómo llegar a la respuesta sin memorizarla.\n"
+        "3. **Por qué fallaste**: identifica concretamente las opciones incorrectas "
+        "marcadas o las correctas omitidas. Si fue perfecta, explica por qué el "
+        "razonamiento fue correcto y qué trampa evitó.\n"
+        "4. **Regla práctica para recordar**: una síntesis aplicable a preguntas similares.\n"
+        "5. **Mini ejemplo**: código o ejemplo breve cuando aporte valor.\n\n"
+        "No te limites a parafrasear la corrección existente.\n\n"
+        f"PREGUNTA CORREGIDA:\n{question_review}"
+    )
+
 
 def build_analysis_prompt(quiz: Quiz, language: str = "es") -> str:
     lang_name = {"es": "español", "en": "inglés"}.get(language, "español")

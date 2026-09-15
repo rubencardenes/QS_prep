@@ -81,15 +81,19 @@ Documentación oficial: [autenticación de Codex](https://learn.chatgpt.com/docs
 
 ## Temas
 
-C++ moderno · Python · Computer Vision · OpenCV · Jetson/CUDA/TensorRT · ROS 2 ·
+C++ moderno · Python · Machine Learning · Computer Vision · OpenCV · Jetson/CUDA/TensorRT · ROS 2 ·
 Mixto. Los temas con apuntes en el repo (`cpp_moderno.md`, `openCV C++.md`,
 `jetson_ros2_QA.md`) pueden usarlos como contexto para ajustar el vocabulario y
 el enfoque de las preguntas.
 
 ## Estado local
 
-`~/.quantum-prep-quiz/history.json` guarda los enunciados ya vistos (para no
-repetirlos) y el histórico de puntuaciones. Se puede borrar sin problema.
+`~/.quantum-prep-quiz/history.db` guarda en SQLite los enunciados ya vistos y el
+histórico completo de puntuaciones. La pantalla **Ver historial** ofrece una tabla
+filtrable por tema y nivel y permite revisar cada test. Al arrancar se importan de
+forma idempotente el antiguo `history.json` y los `revision_test_*.md` del proyecto.
+Cada pregunta del detalle incluye un botón **Review** que pide al modelo una
+explicación ampliada de los fundamentos, el razonamiento y los errores cometidos.
 
 ## Estructura
 

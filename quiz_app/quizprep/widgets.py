@@ -41,16 +41,61 @@ def configure(palette) -> None:
 
 
 def _inline(text: str) -> str:
-    text = html.escape(text)
-    text = re.sub(
-        r"`([^`]+)`", lambda m: f'<span style="{_CODE_STYLE}">{m.group(1)}</span>', text
-    )
+    """Renderiza énfasis, código y delimitadores LaTeX habituales del LLM."""
+    token = re.compile(r"(`[^`]+`|\\\((?:.|\n)*?\\\)|\\\[(?:.|\n)*?\\\])")
+    pieces: list[str] = []
+    last = 0
+    for match in token.finditer(text):
+        pieces.append(_format_emphasis(html.escape(text[last:match.start()])))
+        value = match.group(0)
+        if value.startswith("`"):
+            pieces.append(f'<span style="{_CODE_STYLE}">{html.escape(value[1:-1])}</span>')
+        else:
+            pieces.append(_math_to_html(value[2:-2]))
+        last = match.end()
+    pieces.append(_format_emphasis(html.escape(text[last:])))
+    return "".join(pieces)
+
+
+def _format_emphasis(text: str) -> str:
     text = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", text)
-    text = re.sub(r"(?<![\w*])\*([^*\n]+)\*(?![\w*])", r"<i>\1</i>", text)
-    return text
+    return re.sub(r"(?<![\w*])\*([^*\n]+)\*(?![\w*])", r"<i>\1</i>", text)
+
+
+def _math_to_html(expression: str) -> str:
+    """Convierte un subconjunto de LaTeX a HTML soportado por QTextDocument."""
+    value = html.escape(expression.strip())
+    # Fracciones sencillas; las complejas siguen siendo legibles como (a)/(b).
+    value = re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", r"(\1)/(\2)", value)
+    value = re.sub(r"\\(?:mathrm|text|operatorname)\{([^{}]+)\}", r"\1", value)
+    symbols = {
+        r"\cdot": "·", r"\times": "×", r"\leq": "≤", r"\le": "≤",
+        r"\geq": "≥", r"\ge": "≥", r"\neq": "≠", r"\approx": "≈",
+        r"\rightarrow": "→", r"\leftarrow": "←", r"\infty": "∞",
+        r"\sum": "∑", r"\prod": "∏", r"\sqrt": "√",
+        r"\alpha": "α", r"\beta": "β", r"\gamma": "γ", r"\delta": "δ",
+        r"\epsilon": "ε", r"\lambda": "λ", r"\mu": "μ", r"\sigma": "σ",
+        r"\theta": "θ", r"\pi": "π",
+    }
+    for latex, symbol in symbols.items():
+        value = value.replace(latex, symbol)
+    value = re.sub(r"\^\{([^{}]+)\}", r"<sup>\1</sup>", value)
+    value = re.sub(r"_\{([^{}]+)\}", r"<sub>\1</sub>", value)
+    value = re.sub(r"\^([A-Za-z0-9+-])", r"<sup>\1</sup>", value)
+    value = re.sub(r"_([A-Za-z0-9+-])", r"<sub>\1</sub>", value)
+    value = value.replace(r"\,", " ").replace(r"\;", " ")
+    return f'<span style="font-family: serif; font-style: italic;">{value}</span>'
 
 
 def _block(text: str) -> str:
+    # QTextDocument no ejecuta MathJax. Conservamos cada fórmula de bloque como
+    # una unidad y la renderizamos con el mismo conversor ligero que las inline.
+    text = re.sub(
+        r"\\\[(.*?)\\\]",
+        lambda match: r"\[" + " ".join(match.group(1).splitlines()) + r"\]",
+        text,
+        flags=re.DOTALL,
+    )
     out: list[str] = []
     in_list = False
     for raw_line in text.split("\n"):

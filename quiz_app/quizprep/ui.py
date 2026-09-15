@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 import time
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -22,7 +24,10 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QSplitter,
     QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -30,7 +35,9 @@ from PySide6.QtWidgets import (
 from . import store
 from .generator import (
     ANALYSIS_SYSTEM,
+    QUESTION_REVIEW_SYSTEM,
     build_analysis_prompt,
+    build_question_review_prompt,
     generate_quiz,
 )
 from .llm import CancelledError, LLMError
@@ -88,6 +95,7 @@ def _card() -> QFrame:
 class SetupPage(QWidget):
     start_requested = Signal(dict)
     cancel_requested = Signal()
+    history_requested = Signal()
 
     def __init__(self, settings: Settings, parent=None):
         super().__init__(parent)
@@ -156,10 +164,13 @@ class SetupPage(QWidget):
         self.cancel = QPushButton("Cancelar")
         self.cancel.clicked.connect(self.cancel_requested.emit)
         self.cancel.hide()
+        self.open_history = QPushButton("Ver historial")
+        self.open_history.clicked.connect(self.history_requested.emit)
 
         buttons = QHBoxLayout()
         buttons.addWidget(self.start)
         buttons.addWidget(self.cancel)
+        buttons.addWidget(self.open_history)
         buttons.addStretch(1)
         root.addLayout(buttons)
 
@@ -231,6 +242,249 @@ class SetupPage(QWidget):
         ):
             widget.setEnabled(not busy)
         self.status.setText(message)
+
+
+# ---------------------------------------------------------------------------
+# Página de histórico
+# ---------------------------------------------------------------------------
+
+
+class HistoryQuestionCard(QFrame):
+    """Pregunta histórica con explicación ampliable mediante el LLM."""
+
+    review_requested = Signal(object)
+
+    def __init__(self, number: int, markdown: str, css: str, parent=None):
+        super().__init__(parent)
+        self.number = number
+        self.markdown = markdown
+        self.setObjectName("Card")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
+
+        header = QHBoxLayout()
+        title = QLabel(f"Pregunta {number}")
+        title.setObjectName("SectionTitle")
+        self.review_button = QPushButton("Review")
+        self.review_button.clicked.connect(lambda: self.review_requested.emit(self))
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(self.review_button)
+        layout.addLayout(header)
+
+        question = MarkdownView(css)
+        question.set_markdown(markdown)
+        layout.addWidget(question)
+        self.status = QLabel()
+        self.status.setObjectName("Muted")
+        self.status.setWordWrap(True)
+        self.status.hide()
+        layout.addWidget(self.status)
+        self.explanation = MarkdownView(css, plain=True)
+        self.explanation.hide()
+        layout.addWidget(self.explanation)
+
+    def set_busy(self, busy: bool, message: str = "") -> None:
+        self.review_button.setEnabled(not busy)
+        self.review_button.setText("Generando…" if busy else "Review")
+        self.status.setVisible(bool(message))
+        self.status.setText(message)
+
+    def set_explanation(self, text: str) -> None:
+        self.set_busy(False)
+        self.explanation.set_markdown("## Explicación ampliada\n\n" + text)
+        self.explanation.show()
+
+
+class HistoryPage(QWidget):
+    back_requested = Signal()
+    review_requested = Signal(object, dict)
+
+    def __init__(self, css: str, palette: Palette, parent=None):
+        super().__init__(parent)
+        self._palette = palette
+        root = QVBoxLayout(self)
+        root.setContentsMargins(32, 24, 32, 24)
+        root.setSpacing(14)
+
+        header = QHBoxLayout()
+        title = QLabel("Historial de tests")
+        title.setObjectName("Title")
+        self.back = QPushButton("Volver")
+        self.back.clicked.connect(self.back_requested.emit)
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(self.back)
+        root.addLayout(header)
+
+        filters = QHBoxLayout()
+        self.topic_filter = QComboBox()
+        self.topic_filter.addItem("Todos los temas", "")
+        for topic in TOPICS:
+            self.topic_filter.addItem(topic.label, topic.key)
+        self.difficulty_filter = QComboBox()
+        self.difficulty_filter.addItem("Todos los niveles", "")
+        for key, label in DIFFICULTIES:
+            self.difficulty_filter.addItem(label, key)
+        self.count_label = QLabel()
+        self.count_label.setObjectName("Muted")
+        filters.addWidget(QLabel("Tema"))
+        filters.addWidget(self.topic_filter, 1)
+        filters.addWidget(QLabel("Nivel"))
+        filters.addWidget(self.difficulty_filter, 1)
+        filters.addWidget(self.count_label)
+        root.addLayout(filters)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels(
+            ["Fecha", "Tema", "Nivel", "Preguntas", "Puntos", "Perfectas", "Nota"]
+        )
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.itemSelectionChanged.connect(self._show_selected)
+        splitter.addWidget(self.table)
+
+        review_scroll = QScrollArea()
+        review_scroll.setWidgetResizable(True)
+        self.review_content = QWidget()
+        self.review_layout = QVBoxLayout(self.review_content)
+        self.review_layout.setContentsMargins(4, 4, 8, 8)
+        self.review_layout.setSpacing(12)
+        review_scroll.setWidget(self.review_content)
+        splitter.addWidget(review_scroll)
+        splitter.setSizes([380, 300])
+        root.addWidget(splitter, 1)
+
+        self.topic_filter.currentIndexChanged.connect(self.refresh)
+        self.difficulty_filter.currentIndexChanged.connect(self.refresh)
+        self._rows: list[dict] = []
+        self._css = css
+        self._selected_result: dict | None = None
+        self._show_empty_review("Selecciona un test para revisar sus respuestas.")
+
+    def _clear_review(self) -> None:
+        while self.review_layout.count():
+            item = self.review_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _show_empty_review(self, message: str) -> None:
+        self._clear_review()
+        label = QLabel(message)
+        label.setObjectName("Muted")
+        label.setWordWrap(True)
+        self.review_layout.addWidget(label)
+        self.review_layout.addStretch(1)
+
+    def refresh(self) -> None:
+        self._rows = store.results(
+            self.topic_filter.currentData() or "",
+            self.difficulty_filter.currentData() or "",
+        )
+        self.table.setSortingEnabled(False)
+        self.table.setRowCount(len(self._rows))
+        for row_index, result in enumerate(self._rows):
+            elapsed = result.get("elapsed_seconds")
+            date = result["taken_at"][:16].replace("T", " ")
+            values = [date, result["topic"], result["difficulty"],
+                      str(result["question_count"]), f"{result['points']:.2f}",
+                      f"{result['perfect_count']}/{result['question_count']}",
+                      f"{result['percentage']:.1f}%"]
+            if elapsed is not None:
+                values[0] += f" · {elapsed // 60:02d}:{elapsed % 60:02d}"
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                item.setData(Qt.ItemDataRole.UserRole, result["id"])
+                if column == 2:
+                    item.setForeground(QColor(self._difficulty_colour(result["difficulty"])))
+                    font = item.font()
+                    font.setWeight(QFont.Weight.DemiBold)
+                    item.setFont(font)
+                elif column in (4, 6):
+                    item.setForeground(QColor(self._score_colour(result["percentage"])))
+                self.table.setItem(row_index, column, item)
+        self.table.resizeColumnsToContents()
+        self.table.setSortingEnabled(True)
+        self.count_label.setText(f"{len(self._rows)} tests")
+        self._selected_result = None
+        self._show_empty_review("Selecciona un test para revisar sus respuestas.")
+
+    def _difficulty_colour(self, difficulty: str) -> str:
+        return {
+            "junior": self._palette.ok,
+            "media": self._palette.warn,
+            "senior": "#e67e22",
+            "experto": self._palette.bad,
+        }.get(difficulty, self._palette.muted)
+
+    def _score_colour(self, percentage: float) -> str:
+        if percentage < 50:
+            return self._palette.bad
+        if percentage >= 90:
+            return self._palette.ok
+        # De amarillo a verde entre 50 y 90, manteniendo buen contraste.
+        start, end = QColor(self._palette.warn), QColor(self._palette.ok)
+        ratio = (percentage - 50) / 40
+        red = round(start.red() + (end.red() - start.red()) * ratio)
+        green = round(start.green() + (end.green() - start.green()) * ratio)
+        blue = round(start.blue() + (end.blue() - start.blue()) * ratio)
+        return QColor(red, green, blue).name()
+
+    def _show_selected(self) -> None:
+        selected = self.table.selectedItems()
+        if not selected:
+            return
+        result_id = selected[0].data(Qt.ItemDataRole.UserRole)
+        result = next((row for row in self._rows if row["id"] == result_id), None)
+        if result is None:
+            return
+        self._selected_result = result
+        content = result.get("review_markdown", "")
+        if not content:
+            self._show_empty_review(
+                "La entrada migrada contiene la puntuación histórica, pero no "
+                "una revisión pregunta a pregunta."
+            )
+            return
+        self._clear_review()
+        intro, marker, body = content.partition("## Revisión pregunta a pregunta")
+        summary = MarkdownView(self._css)
+        summary.set_markdown(intro.strip())
+        self.review_layout.addWidget(summary)
+        sections = re.split(r"(?=^###\s+)", body if marker else content, flags=re.MULTILINE)
+        question_number = 0
+        for section in sections:
+            if not section.strip().startswith("###"):
+                continue
+            question_number += 1
+            card = HistoryQuestionCard(question_number, section.strip(), self._css)
+            card.review_requested.connect(self._request_review)
+            self.review_layout.addWidget(card)
+        if not question_number:
+            fallback = MarkdownView(self._css)
+            fallback.set_markdown(content)
+            self.review_layout.addWidget(fallback)
+        self.review_layout.addStretch(1)
+
+    def _request_review(self, card: HistoryQuestionCard) -> None:
+        if self._selected_result is not None:
+            self.review_requested.emit(card, self._selected_result)
+
+    def set_review_busy(self, card: HistoryQuestionCard, busy: bool,
+                        message: str = "") -> None:
+        self.table.setEnabled(not busy)
+        self.topic_filter.setEnabled(not busy)
+        self.difficulty_filter.setEnabled(not busy)
+        self.back.setEnabled(not busy)
+        for question_card in self.review_content.findChildren(HistoryQuestionCard):
+            question_card.review_button.setEnabled(not busy)
+        card.set_busy(busy, message)
 
 
 # ---------------------------------------------------------------------------
@@ -611,17 +865,21 @@ class MainWindow(QMainWindow):
         self.setup_page = SetupPage(settings)
         self.quiz_page = QuizPage(self._css)
         self.results_page = ResultsPage(self._css, palette)
-        for page in (self.setup_page, self.quiz_page, self.results_page):
+        self.history_page = HistoryPage(self._css, palette)
+        for page in (self.setup_page, self.quiz_page, self.results_page, self.history_page):
             self.stack.addWidget(page)
         self.setCentralWidget(self.stack)
 
         self.setup_page.start_requested.connect(self.start_generation)
         self.setup_page.cancel_requested.connect(self.cancel_generation)
+        self.setup_page.history_requested.connect(self.show_history)
         self.quiz_page.finish_requested.connect(self.finish_quiz)
         self.quiz_page.abort_requested.connect(self.abort_quiz)
         self.results_page.new_quiz_requested.connect(self.go_setup)
         self.results_page.analysis_requested.connect(self.request_analysis)
         self.results_page.export_requested.connect(self.export_markdown)
+        self.history_page.back_requested.connect(self.go_setup)
+        self.history_page.review_requested.connect(self.review_history_question)
 
     # -- generación --------------------------------------------------------
     def start_generation(self, config: dict) -> None:
@@ -731,7 +989,10 @@ class MainWindow(QMainWindow):
                 return
         self.quiz_page.stop_timer()
         self._elapsed = self.quiz_page.elapsed()
-        store.record_result(self._config.get("topic_key", ""), quiz)
+        store.record_result(
+            self._config.get("topic_key", ""), quiz, elapsed=self._elapsed,
+            language=self._config.get("language", ""), model=self._config.get("model", ""),
+        )
         self.setup_page.refresh_history()
         self.results_page.show_results(quiz, self._elapsed)
         self.stack.setCurrentWidget(self.results_page)
@@ -750,6 +1011,10 @@ class MainWindow(QMainWindow):
     def go_setup(self) -> None:
         self.setup_page.refresh_history()
         self.stack.setCurrentWidget(self.setup_page)
+
+    def show_history(self) -> None:
+        self.history_page.refresh()
+        self.stack.setCurrentWidget(self.history_page)
 
     # -- diagnóstico -------------------------------------------------------
     def request_analysis(self) -> None:
@@ -780,6 +1045,44 @@ class MainWindow(QMainWindow):
             self._worker = None
             self.results_page.set_analysis_busy(False)
             QMessageBox.critical(self, "No se pudo obtener el diagnóstico", message)
+
+        worker.done.connect(on_done)
+        worker.failed.connect(on_failed)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def review_history_question(self, card: HistoryQuestionCard, result: dict) -> None:
+        if self._worker is not None:
+            return
+        try:
+            client = self.settings.client(model=result.get("model") or self.settings.model)
+        except LLMError as exc:
+            QMessageBox.critical(self, "Error del proveedor", str(exc))
+            return
+
+        prompt = build_question_review_prompt(
+            card.markdown, result["topic"], result["difficulty"],
+            result.get("language") or "es",
+        )
+        self.history_page.set_review_busy(
+            card, True, f"{self.settings.label} está preparando la explicación…"
+        )
+
+        def job(cancel, _report):
+            return client.complete(QUESTION_REVIEW_SYSTEM, prompt, cancel=cancel)
+
+        worker = Worker(job, self)
+        self._worker = worker
+
+        def on_done(text: str) -> None:
+            self._worker = None
+            self.history_page.set_review_busy(card, False)
+            card.set_explanation(text)
+
+        def on_failed(message: str) -> None:
+            self._worker = None
+            self.history_page.set_review_busy(card, False)
+            QMessageBox.critical(self, "No se pudo generar la explicación", message)
 
         worker.done.connect(on_done)
         worker.failed.connect(on_failed)
