@@ -40,7 +40,7 @@ Extrinsic parameters: Rotation, translation
 - Telecentric cameras: ensure that chief rays remain mainly parallel in the object-space or the image space. Then magnification remains constant with changes of the object in the Z dimension (along the camera axis) 
 - Bi-telecentric cameras: ensure that chief rays ramin mainly parallel in object space AND image space. These are bigger and more expensive. 
 
-For calibration in the nanometer scale we need to use quartz with chorme-on-glass litography patterns, uainf circular dot arrays. Quartz has very low thermal expansion. 
+For calibration in the nanometer scale we need to use quartz with chorme-on-glass litography patterns, using circular dot arrays. Quartz has very low thermal expansion. 
 
 # Implementation details 
 Once camera is calibrated:
@@ -50,8 +50,16 @@ Once camera is calibrated:
 
 # Industrial cameras
 - Global shutter
-- Interface: 
+- Monochrome camera
+- Camera Interface: 
    - MIPI CSI 2: 1.5-2.5 Gbps direct embeded bus available in Jetsons 
    - 10GigE Vision: low latenciy 
    - CoaxPress: Up to 12.5 Gbps, ultra-low latency 
-    
+
+# Computing and frame grabber
+FPGA: deterministic acquisition
+
+# Interferometry
+
+
+# 
