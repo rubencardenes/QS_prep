@@ -79,7 +79,9 @@ Ojo con la trampa clásica: `vector<int> v(10)` son 10 ceros, pero `vector<int> 
 ```cpp
 v.size()        v.empty()       v.capacity()
 v.push_back(x);                 // copia/mueve x
-v.emplace_back(args...);        // CONSTRUYE in-place, sin temporal. Devuelve T& (C++17)
+v.emplace_back(args...);        // Se usa para anadir elementos al vector usando el constructor de la classe. 
+                                // No aporta nada con respecto a tipos simples como int o float  
+                                // CONSTRUYE in-place, sin temporal. Devuelve T& (C++17)
 v.pop_back();                   // quita el último. NO devuelve nada (void)
 v.front()  v.back()             // referencias al primero/último. UB si está vacío
 v[i]                            // sin comprobación de rango → rápido
@@ -87,7 +89,8 @@ v.at(i)                         // lanza std::out_of_range → seguro
 v.clear();                      // size = 0, capacity intacta
 v.resize(n);                    // cambia el tamaño lógico (rellena con 0)
 v.reserve(n);                   // reserva capacidad, NO cambia size
-v.assign(n, val);               // reemplaza el contenido entero
+v.assign(n, val);               // Asigna el valor val, un total de n veces.
+                                // reemplaza el contenido entero, aunque el vector existente sea mas grande.
 v.insert(v.begin() + 2, 99);    // O(n): mueve todo lo que viene detrás
 v.erase(v.begin() + 2);         // O(n)
 v.erase(v.begin()+1, v.begin()+4); // borra rango [1,4)
@@ -575,8 +578,9 @@ Bug clásico: `for (auto& [k,v] : myMap)` — `k` es `const` porque las claves d
 
 ```cpp
 const int  x = 5;
-const int* p;        // puntero a const int  → no puedes cambiar *p
-int* const q = &y;   // puntero constante    → no puedes cambiar q
+const int* p;        // puntero a const int  → no puedes cambiar el valor al que apunta el puntero *p, el puntero puede cambiar
+                     // es lo mismo que int const *p;
+int* const q = &y;   // puntero constante    → no puedes cambiar el puntero q, o sea no los puedes apuntar a otra cosa
 // Léelo de derecha a izquierda
 
 class Image {

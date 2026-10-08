@@ -12,12 +12,15 @@
     - Then using the eigenvector analysis, we can estimate the center of an edge with subpixel precision taking the eigenvector direction corresponding to the highest eigenvalue. 
     - Using a polinomial approach, with Taylor expansion approximation, we can get an accurate estimation of the center of a given edge.
     - It doesn't suffer from pixel locking.  
-- Interpolation with Zernike moments. ???
+- Interpolation with Zernike moments. More suitable for step edges (transitions between two flat regions). Zernike moments form an orthogonal basis therefore noise in high order components does not couple into low order moments used to compute the solution. 
 - Parabolic fitting. Simply fitting a parabola with 3 pixel values located around the maximum. It is fast and simple but suffers from pixel locking and does not take into account the PSF. 
 - Log-Gaussian fitting. We model the image intensity with a 2D gaussian PSF. Taking the log, reduces it to a parabolic fitting. It is in general more accurate then the method before, but still is not great.
+- cv::CornerSubPix: implemented in opencCV. Used to refine corner detection. The idea es that in corners the gradients of each point are perpendicular to the line joiining it to the theoretical corner. Using this idea in a local window we can optimze solving a liner system iteratively.   
+- cv::find4QuadCornerSubpix: Specialized for chessboard calibration targets. Fits two sets of intersecting lines across the dark/light quadrants of a checkerboard square to locate the saddle point with sub-pixel precision.
+- cv::simpleBlobDetector: Uses CoG method (iterative spatial moments for subpixel precision). It uses multiple thresholds to find binary masks and apply the moments for all of them. Computationally inefficient. 
 
 # Co-registration 
-- Cross-correlation methods 
+- Cross-correlation methods matchTemplate
 - Cross-correlation in the freq space, with upsampling using matricial DFT. 
    Step 1. Find Offset in pixel precision
    - Compute the FFT of the two images.
@@ -60,6 +63,26 @@ Once camera is calibrated:
 FPGA: deterministic acquisition
 
 # Interferometry
+Requires expensive a setups and look only at simple points. 
+Sensitive to air turbulences. 
+Extremely precise. 
 
+# OpenCV
+## Feature detection methods
+- cornerHarris: Computes the second moment autocorrelation matric (structure tensor) and decides if a feature is good if det(M)-k * trace(M)^2 (the simplest thing you can do)
+goodfeaturestoTrack: Shi-Tomasi method. Directly computes the eigenvalues of M. Uses a different response R=min(lambda1, lambda2)
+fastFeatureDetector: extremely fast method. Features from Accelerated Segment Test. Examina un circula de pixeles alrededor de un pto candidato y lo fija si hay mucho pontos consecutivos que son mas claros o oscuros que el centro. En ORB se usa este method combinado con otras mejoras. 
+simpleBlobDetector: uses CoG method in multiple binarizations of the image. 
+- SIFT: Scale Invariant Feature Transform. Computes Difference of Gaussians scale-spacem, and then use gradient histograms as descriptors 
+- ORB: It uses Hamming distance which is faster than SIFT 
+- AKAZE
+- BRISK: FAST in sacel-space pyramid
+- MSER 
 
-# 
+# Questions
+What is the target FPS and latency that you want to achieve?
+Is the hardware setup already decided? 
+Is there any plans to use advance 
+What are the targets that you want to identify in the image? 
+How are you dealing with camera calibration? 
+What algorithms do you have in mind? 
